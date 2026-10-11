@@ -327,7 +327,11 @@ async function getSpotifyToken(){
 async function spotifyFetch(url){
   const token = await getSpotifyToken();
   const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
-  if(!res.ok) throw new Error('Error de Spotify: ' + res.status);
+  if(!res.ok){
+    let detail = '';
+    try{ const body = await res.json(); detail = body?.error?.message || ''; }catch(e){}
+    throw new Error('Spotify ' + res.status + (detail ? ' — ' + detail : ''));
+  }
   return res.json();
 }
 async function searchArtists(query){
@@ -599,8 +603,16 @@ async function buildPool(){
   for(const artist of selectedArtists.values()) groups.push(searchArtistTracks(artist, yearFrom, yearTo));
   for(const genre of selectedGenres) groups.push(searchGenreTracks(genre, yearFrom, yearTo));
   if(groups.length===0) groups.push(searchGenreTracks('pop', yearFrom, yearTo)); // no filters: fall back to popular pop tracks
-  const results = await Promise.all(groups);
-  let pool = results.flat();
+
+  // Settle each search independently: one artist/genre failing shouldn't sink the whole pool
+  // if the others succeed. Only throw (with the real reason) if every single one failed.
+  const settled = await Promise.allSettled(groups);
+  const fulfilled = settled.filter(r => r.status==='fulfilled');
+  if(fulfilled.length===0){
+    const firstError = settled.find(r => r.status==='rejected');
+    throw firstError ? firstError.reason : new Error('Sin resultados');
+  }
+  let pool = fulfilled.flatMap(r => r.value);
 
   // de-dupe by title+artist
   const seen = new Set();
@@ -635,7 +647,7 @@ $('startBtn').onclick = async ()=>{
     $('sheetBackdrop').hidden = true;
     startSession(pool, pendingMode);
   }catch(e){
-    $('configError').textContent = 'No se pudo conectar con Spotify. Revisa tu conexión e inténtalo de nuevo.';
+    $('configError').textContent = 'No se pudo conectar con Spotify (' + (e?.message || 'error desconocido') + '). Revisa tu conexión e inténtalo de nuevo.';
   }finally{
     $('startBtn').disabled = false;
     $('startBtn').textContent = 'Jugar';
