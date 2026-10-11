@@ -99,15 +99,6 @@ button.primary{background:var(--accent2);color:#06261c;border-color:var(--accent
 .writerow{margin-top:12px}
 button.ghostline{background:transparent;color:var(--fg-soft)}
 
-.suglist{margin-top:8px;border-radius:12px;overflow:hidden;border:1px solid var(--line)}
-.sugitem{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--card);width:100%;text-align:left;border:none;border-radius:0}
-.sugitem+.sugitem{border-top:1px solid var(--line)}
-.sugitem .thumb{width:38px;height:38px;border-radius:8px;background:var(--card2) center/cover no-repeat;flex-shrink:0}
-.sugitem .meta{min-width:0}
-.sugitem .t{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sugitem .a{font-size:12px;color:var(--fg-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sugmore{font-size:12px;color:var(--fg-mute);text-align:center;padding:7px 0}
-
 .reveal{border-radius:14px;padding:13px;margin-top:10px;border:1px solid}
 .reveal.ok{border-color:var(--accent2);background:color-mix(in srgb, var(--accent2) 10%, var(--card))}
 .reveal.ko{border-color:var(--danger);background:color-mix(in srgb, var(--danger) 10%, var(--card))}
@@ -303,7 +294,6 @@ button.ghostline{background:transparent;color:var(--fg-soft)}
       <div id="options" style="margin-top:10px"></div>
       <div class="writerow" id="writeRow" hidden>
         <input type="text" id="writeInput" placeholder="Escribe el título de la canción…" autocomplete="off">
-        <div id="writeSuggestions"></div>
         <button class="block ghostline" id="giveUpBtn" style="margin-top:6px">Rendirse</button>
         <button class="primary block" id="writeSubmitBtn" style="margin-top:6px">Comprobar</button>
       </div>
@@ -529,22 +519,43 @@ function playClip(videoId, startSeconds, seconds, onStart){
       let started = false;
       let settled = false;
       let confirmTimer = null;
+      let pollTimer = null;
+      let playedMs = 0;       // actual accumulated time spent in PLAYING state, not wall-clock
+      let lastPollAt = null;
       const finish = ()=>{
         if(settled) return;
         settled = true;
         if(confirmTimer) clearTimeout(confirmTimer);
+        if(pollTimer) clearInterval(pollTimer);
         try{ ytPlayer.pauseVideo(); }catch(e){}
         resolve();
+      };
+      // Rather than a plain setTimeout(finish, seconds*1000) from the moment playback is
+      // confirmed to start, this polls the player's real state and only counts time while
+      // it's actually PLAYING. A mobile network stall mid-clip (rebuffering) used to keep
+      // the wall-clock timer running while no audio was coming out, so the clip "finished"
+      // (and got paused) after barely a second or two of real sound — this makes sure the
+      // full requested duration is actually heard, waiting out any stalls instead.
+      const beginPolling = ()=>{
+        lastPollAt = Date.now();
+        pollTimer = setInterval(()=>{
+          if(settled) return;
+          const now = Date.now();
+          let state = null;
+          try{ state = ytPlayer.getPlayerState(); }catch(e){}
+          if(state === YT.PlayerState.PLAYING) playedMs += (now - lastPollAt);
+          lastPollAt = now;
+          if(playedMs >= seconds*1000) finish();
+        }, 150);
       };
       ytStateHandler = (e)=>{
         if(e.data === YT.PlayerState.PLAYING && !started){
           // Seeking to a non-zero startSeconds on loadVideoById sometimes fires a brief,
           // spurious PLAYING event *before* the seek has actually landed — the audio is
           // still catching up — and it quickly drops back to BUFFERING. Trusting that
-          // first blink started the clip's timer before any real audio had played, which
-          // is exactly what made clips cut out after a second or two and go silent for
-          // the rest of the timer. So don't trust it immediately: wait a beat and confirm
-          // we're genuinely still playing before starting the timer.
+          // first blink to mark the real start made the on-screen timer/progress bar kick
+          // off before any real audio had played. So don't trust it immediately: wait a
+          // beat and confirm we're genuinely still playing before calling it the real start.
           if(confirmTimer) clearTimeout(confirmTimer);
           confirmTimer = setTimeout(()=>{
             if(settled || started) return;
@@ -553,7 +564,11 @@ function playClip(videoId, startSeconds, seconds, onStart){
             if(stillPlaying){
               started = true;
               onStart && onStart();
-              setTimeout(finish, seconds*1000);
+              beginPolling();
+              // If buffering stalls never recover, waiting for enough *real* playing time
+              // could hang forever — give it a generous grace window beyond the clip's own
+              // length and then just cut it there rather than leaving the round stuck.
+              setTimeout(finish, seconds*1000 + 15000);
             }
             // else: still buffering/seeking — the next real onStateChange PLAYING event
             // (once the seek actually lands) will re-arm this check.
@@ -570,11 +585,13 @@ function playClip(videoId, startSeconds, seconds, onStart){
         if(settled) return;
         settled = true;
         if(confirmTimer) clearTimeout(confirmTimer);
+        if(pollTimer) clearInterval(pollTimer);
         reject(new Error('video error'));
       };
       ytPlayer.addEventListener('onStateChange', ytStateHandler);
-      // Safety: if playback never starts (blocked video etc.), fail after 8s
-      setTimeout(()=>{ if(!started && !settled){ settled = true; if(confirmTimer) clearTimeout(confirmTimer); reject(new Error('timeout')); } }, 8000);
+      // Safety: if playback never really starts (blocked video, stuck forever buffering),
+      // fail after 12s instead of leaving the round hanging indefinitely.
+      setTimeout(()=>{ if(!started && !settled){ settled = true; if(confirmTimer) clearTimeout(confirmTimer); if(pollTimer) clearInterval(pollTimer); reject(new Error('timeout')); } }, 12000);
     }catch(err){ reject(err); }
   });
 }
@@ -721,12 +738,39 @@ function levenshtein(a,b){
   }
   return d[m][n];
 }
+// Edition/version qualifiers that shouldn't matter for guessing purposes — "Cuando no
+// era cantante" and "Cuando no era cantante (Remix)" are the same song to type, even
+// though they can be two separate catalog entries (and the one actually playing might
+// be either one).
+const EDITION_WORDS = /\b(remix|rmx|remaster(?:ed|izad[oa])?|re[-\s]?record(?:ed|ado)?|live|en vivo|en directo|directo|acoustic|ac[uú]stic[oa]|unplugged|version|versi[oó]n|edit|radio edit|extended|instrumental|demo|deluxe|bonus track|single version|album version|from the album.*|soundtrack version|mono|stereo|karaoke|cover)\b/i;
+function stripEdition(title){
+  let t = title;
+  // Drop a trailing bracketed/parenthesized qualifier entirely if it contains one of the
+  // words above — but leave it alone if it's just part of the actual title.
+  t = t.replace(/\s*[\(\[][^\)\]]*[\)\]]\s*$/, m => EDITION_WORDS.test(m) ? '' : m);
+  // Same for a trailing " - Qualifier" suffix (common on singles/remix releases).
+  t = t.replace(/\s+[-–]\s+[^-–]+$/, m => EDITION_WORDS.test(m) ? '' : m);
+  return t.trim();
+}
+function closeEnough(a, b){
+  if(!a || !b) return false;
+  if(a===b) return true;
+  const tol = b.length<=5 ? 1 : (b.length<=10 ? 2 : 3);
+  return levenshtein(a,b) <= tol;
+}
 function isCloseMatch(guess, title){
   const g = normalize(guess), t = normalize(title);
   if(!g) return false;
-  if(g===t) return true;
-  const tol = t.length<=5 ? 1 : (t.length<=10 ? 2 : 3);
-  return levenshtein(g,t) <= tol;
+  if(closeEnough(g,t)) return true;
+  // Accept the guess if it matches once a known edition qualifier (Remix, En directo,
+  // Versión álbum...) is stripped from either side — it's the same song to write,
+  // whichever edition happens to be the one that's actually playing (or the one typed).
+  const tBase = normalize(stripEdition(title));
+  const gBase = normalize(stripEdition(guess));
+  if(tBase && tBase!==t && closeEnough(g, tBase)) return true;
+  if(gBase && gBase!==g && closeEnough(gBase, t)) return true;
+  if(tBase && gBase && tBase!==t && gBase!==g && closeEnough(gBase, tBase)) return true;
+  return false;
 }
 
 function openSheet(mode){
@@ -945,7 +989,6 @@ async function nextRound(){
     $('options').hidden = true;
     $('writeRow').hidden = false;
     $('writeInput').value = '';
-    $('writeSuggestions').innerHTML = '';
     $('writeInput').disabled = true;
     $('writeSubmitBtn').disabled = true;
     $('giveUpBtn').disabled = true;
@@ -1086,7 +1129,6 @@ function submitWrite(isGiveUp){
   stopClip();
   collapsePlayControls();
   $('writeRow').hidden = true;
-  $('writeSuggestions').innerHTML = '';
   $('timeFill').style.transition = 'none';
   $('writeInput').disabled = true;
   $('writeSubmitBtn').disabled = true;
@@ -1099,51 +1141,10 @@ function submitWrite(isGiveUp){
 $('writeSubmitBtn').onclick = ()=>submitWrite(false);
 $('giveUpBtn').onclick = ()=>submitWrite(true);
 $('writeInput').addEventListener('keydown', e=>{ if(e.key==='Enter') submitWrite(false); });
-
-// Live song suggestions while typing in "write the title" mode — tapping one answers with it.
-// IMPORTANT: this must search the live Spotify catalog, never session.pool — that pool *is*
-// the game's queue, so suggesting from it leaks which songs are coming up next.
-let writeSuggestDebounce = null;
-let writeSuggestToken = 0;
-$('writeInput').addEventListener('input', e=>{
-  clearTimeout(writeSuggestDebounce);
-  const q = e.target.value;
-  writeSuggestDebounce = setTimeout(()=>renderWriteSuggestions(q), 300);
-});
-async function renderWriteSuggestions(q){
-  const box = $('writeSuggestions');
-  const myToken = ++writeSuggestToken;
-  if(!q.trim() || !session || session.answered){ box.innerHTML = ''; return; }
-  let matches;
-  try{
-    matches = await searchTrackSuggestions(q);
-  }catch(e){ matches = []; }
-  if(myToken !== writeSuggestToken) return; // a newer keystroke's search landed first
-  box.innerHTML = '';
-  if(matches.length===0) return;
-  const list = document.createElement('div');
-  list.className = 'suglist';
-  matches.slice(0,6).forEach(s=>{
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'sugitem';
-    b.innerHTML = '<span class="thumb"' + (s.img ? ` style="background-image:url('${s.img}')"` : '') + '></span>' +
-      '<span class="meta"><div class="t"></div><div class="a"></div></span>';
-    b.querySelector('.t').textContent = s.t;
-    b.querySelector('.a').textContent = s.a;
-    b.onclick = ()=>{
-      $('writeInput').value = s.t;
-      box.innerHTML = '';
-      submitWrite(false);
-    };
-    list.appendChild(b);
-  });
-  box.appendChild(list);
-}
-async function searchTrackSuggestions(q){
-  const data = await spotifyFetch('https://api.spotify.com/v1/search?type=track&limit=10&q=' + encodeURIComponent(q));
-  return (data.tracks?.items || []).map(tr => trackToSong(tr, ''));
-}
+// No live suggestions/autocomplete here on purpose: showing matching titles while typing
+// ends up handing you the answer the moment you've typed enough of it to match — exactly
+// the "indirect hint" the write-the-title mode is supposed to avoid. isCloseMatch() below
+// already forgives small typos/accents, so you don't need spelling help to get credit.
 
 $('pwFifty').onclick = ()=>{
   const pw = activePowerups();
