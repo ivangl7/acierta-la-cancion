@@ -6,6 +6,7 @@
   --card:#181a24; --card2:#1e2130; --line:#2a2d3d;
   --grad1:#7c6ef0; --grad2:#b05ad6;
   --grad1b:#4b3f8f; --grad2b:#6b3f8f;
+  --grad1c:#e0a83c; --grad2c:#c9742e;
   --accent2:#34c99b; --danger:#e8605f; --warn:#e0a83c;
   --radius:16px;
 }
@@ -49,6 +50,13 @@ button.block{width:100%}
 .modecard .arrow{margin-left:auto;font-size:18px;opacity:.8}
 .modecard.solo{background:linear-gradient(135deg,var(--grad1),var(--grad2))}
 .modecard.versus{background:linear-gradient(135deg,var(--grad1b),var(--grad2b))}
+.modecard.ranking{background:linear-gradient(135deg,var(--grad1c),var(--grad2c))}
+.rankrow{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-bottom:8px}
+.rankrow .pos{font-family:'Sora',sans-serif;font-weight:700;color:var(--fg-mute);width:22px;flex-shrink:0;text-align:center}
+.rankrow .name{flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rankrow .pts{font-family:'Sora',sans-serif;font-weight:700;color:var(--accent2);flex-shrink:0}
+.rankrow .acc{font-size:11px;color:var(--fg-mute);flex-shrink:0;margin-left:8px}
+.rankempty{text-align:center;color:var(--fg-mute);font-size:13px;margin-top:30px}
 
 .footnote{font-size:12px;color:var(--fg-mute);text-align:center;margin-top:28px}
 
@@ -148,8 +156,32 @@ button.ghostline{background:transparent;color:var(--fg-soft)}
       </span>
       <span class="arrow">→</span>
     </button>
+    <button class="modecard ranking" id="openRanking">
+      <span class="icon">📊</span>
+      <span>
+        <div class="title">Clasificación</div>
+        <div class="desc">Tus puntos y aciertos por artista</div>
+      </span>
+      <span class="arrow">→</span>
+    </button>
 
     <p class="footnote">Catálogo en vivo vía Spotify · audio vía YouTube.</p>
+  </section>
+
+  <!-- RANKING SCREEN -->
+  <section id="screen-ranking" hidden>
+    <div class="hdr" style="margin-bottom:0">
+      <div>
+        <p class="eyebrow">Acierta la canción</p>
+        <h1 class="hello">Clasificación</h1>
+      </div>
+      <button id="closeRanking" aria-label="Volver" style="flex-shrink:0;width:40px;height:40px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:50%">←</button>
+    </div>
+    <p class="sub">Puntos y aciertos acumulados por artista en todas tus partidas.</p>
+    <div class="field" style="margin-top:14px">
+      <input type="text" id="rankingSearch" placeholder="Buscar un artista, ej. Noel…">
+    </div>
+    <div id="rankingList" style="margin-top:14px"></div>
   </section>
 
   <!-- CONFIG SHEET -->
@@ -421,11 +453,15 @@ async function searchGenreTracks(genre, yearFrom, yearTo){
 
 // ---------- YouTube (audio-only playback via hidden IFrame player) ----------
 let ytPlayer = null, ytReady = false, ytReadyResolvers = [];
+let ytErrorHandler = null;
 window.onYouTubeIframeAPIReady = function(){
   ytPlayer = new YT.Player('ytplayer', {
     height: '1', width: '1',
     playerVars: { autoplay: 0, controls: 0, disablekb: 1, fs: 0, modestbranding: 1 },
-    events: { onReady: ()=>{ ytReady = true; ytReadyResolvers.forEach(r=>r()); ytReadyResolvers = []; } }
+    events: {
+      onReady: ()=>{ ytReady = true; ytReadyResolvers.forEach(r=>r()); ytReadyResolvers = []; },
+      onError: (e)=>{ ytErrorHandler && ytErrorHandler(e); }
+    }
   });
 };
 function waitForYt(){
@@ -492,26 +528,53 @@ function playClip(videoId, startSeconds, seconds, onStart){
       ytPlayer.loadVideoById({ videoId, startSeconds });
       let started = false;
       let settled = false;
+      let confirmTimer = null;
       const finish = ()=>{
         if(settled) return;
         settled = true;
+        if(confirmTimer) clearTimeout(confirmTimer);
         try{ ytPlayer.pauseVideo(); }catch(e){}
         resolve();
       };
       ytStateHandler = (e)=>{
         if(e.data === YT.PlayerState.PLAYING && !started){
-          started = true;
-          onStart && onStart();
-          setTimeout(finish, seconds*1000);
+          // Seeking to a non-zero startSeconds on loadVideoById sometimes fires a brief,
+          // spurious PLAYING event *before* the seek has actually landed — the audio is
+          // still catching up — and it quickly drops back to BUFFERING. Trusting that
+          // first blink started the clip's timer before any real audio had played, which
+          // is exactly what made clips cut out after a second or two and go silent for
+          // the rest of the timer. So don't trust it immediately: wait a beat and confirm
+          // we're genuinely still playing before starting the timer.
+          if(confirmTimer) clearTimeout(confirmTimer);
+          confirmTimer = setTimeout(()=>{
+            if(settled || started) return;
+            let stillPlaying = false;
+            try{ stillPlaying = ytPlayer.getPlayerState() === YT.PlayerState.PLAYING; }catch(err){}
+            if(stillPlaying){
+              started = true;
+              onStart && onStart();
+              setTimeout(finish, seconds*1000);
+            }
+            // else: still buffering/seeking — the next real onStateChange PLAYING event
+            // (once the seek actually lands) will re-arm this check.
+          }, 300);
         } else if(e.data === YT.PlayerState.ENDED){
           // The video ended before our timer did (clip start too close to the real end) —
           // resolve instead of leaving the round stuck in silence with no way to recover.
           finish();
         }
       };
+      ytErrorHandler = ()=>{
+        // Video unavailable/blocked for embedding — fail fast instead of waiting out the
+        // full timeout with nothing audible and no way to recover until it expires.
+        if(settled) return;
+        settled = true;
+        if(confirmTimer) clearTimeout(confirmTimer);
+        reject(new Error('video error'));
+      };
       ytPlayer.addEventListener('onStateChange', ytStateHandler);
-      // Safety: if playback never starts (blocked video etc.), fail after 6s
-      setTimeout(()=>{ if(!started && !settled){ settled = true; reject(new Error('timeout')); } }, 6000);
+      // Safety: if playback never starts (blocked video etc.), fail after 8s
+      setTimeout(()=>{ if(!started && !settled){ settled = true; if(confirmTimer) clearTimeout(confirmTimer); reject(new Error('timeout')); } }, 8000);
     }catch(err){ reject(err); }
   });
 }
@@ -536,6 +599,58 @@ document.querySelectorAll('#themeChips .chip').forEach(btn=>{
 });
 $('openSettings').onclick = ()=>{ $('settingsBackdrop').hidden = false; };
 $('closeSettings').onclick = ()=>{ $('settingsBackdrop').hidden = true; };
+
+// ---------- Per-artist stats (local, per browser) ----------
+// Keyed by artist name as it appears on the song (collabs are split into each
+// individual artist) so picking one artist in the ranking screen shows what you've
+// actually earned/guessed on their tracks across every past session.
+let artistStats = {};
+try{ artistStats = JSON.parse(localStorage.getItem('acc_artist_stats')||'{}'); }catch(e){}
+function saveArtistStats(){ try{ localStorage.setItem('acc_artist_stats', JSON.stringify(artistStats)); }catch(e){} }
+function creditArtistStats(song, isCorrect, points){
+  if(!song || !song.a) return;
+  const names = song.a.split(',').map(s=>s.trim()).filter(Boolean);
+  names.forEach(name=>{
+    const s = artistStats[name] || (artistStats[name] = {correct:0, played:0, points:0});
+    s.played++;
+    if(isCorrect) s.correct++;
+    s.points += points;
+  });
+  saveArtistStats();
+}
+function renderRanking(filter){
+  const box = $('rankingList');
+  const q = normalize(filter||'');
+  const rows = Object.keys(artistStats)
+    .map(name=>({name, ...artistStats[name]}))
+    .filter(r => !q || normalize(r.name).includes(q))
+    .sort((a,b)=> b.points - a.points);
+  box.innerHTML = '';
+  if(rows.length===0){
+    box.innerHTML = '<p class="rankempty">' + (Object.keys(artistStats).length===0
+      ? 'Todavía no has jugado ninguna partida. ¡Juega una ronda y vuelve aquí!'
+      : 'Ningún artista coincide con esa búsqueda.') + '</p>';
+    return;
+  }
+  rows.forEach((r,i)=>{
+    const pct = r.played>0 ? Math.round(100*r.correct/r.played) : 0;
+    const row = document.createElement('div');
+    row.className = 'rankrow';
+    row.innerHTML = `<span class="pos">${i+1}</span><span class="name">${r.name}</span><span class="acc">${r.correct}/${r.played} · ${pct}%</span><span class="pts">${r.points}</span>`;
+    box.appendChild(row);
+  });
+}
+$('openRanking').onclick = ()=>{
+  $('screen-config').hidden = true;
+  $('screen-ranking').hidden = false;
+  $('rankingSearch').value = '';
+  renderRanking('');
+};
+$('closeRanking').onclick = ()=>{
+  $('screen-ranking').hidden = true;
+  $('screen-config').hidden = false;
+};
+$('rankingSearch').addEventListener('input', e=>renderRanking(e.target.value));
 
 // ---------- Best-of stats (local, per browser) ----------
 let best = {score:0, streak:0, played:0};
@@ -962,7 +1077,7 @@ function answer(isCorrect, btn, song){
     if(correctBtn) correctBtn.classList.add('correct');
   }
   revealAnswer(isCorrect, song);
-  registerResult(isCorrect);
+  registerResult(isCorrect, song);
 }
 
 function submitWrite(isGiveUp){
@@ -979,7 +1094,7 @@ function submitWrite(isGiveUp){
   const song = session.currentSong;
   const isCorrect = !isGiveUp && isCloseMatch($('writeInput').value, song.t);
   revealAnswer(isCorrect, song);
-  registerResult(isCorrect);
+  registerResult(isCorrect, song);
 }
 $('writeSubmitBtn').onclick = ()=>submitWrite(false);
 $('giveUpBtn').onclick = ()=>submitWrite(true);
@@ -1049,13 +1164,15 @@ $('pwSkip').onclick = ()=>{
   nextRound();
 };
 
-function registerResult(isCorrect){
+function registerResult(isCorrect, song){
   session.played++;
+  let pointsGained = 0;
   if(session.players){
     const p = currentPlayer();
     if(isCorrect){
       session.streak++; session.bestStreak=Math.max(session.bestStreak,session.streak);
-      p.score += Math.round((10 + session.streak*2) * DIFF_MULT[diffSeconds]);
+      pointsGained = Math.round((10 + session.streak*2) * DIFF_MULT[diffSeconds]);
+      p.score += pointsGained;
     } else {
       session.streak = 0;
       p.lives--;
@@ -1063,12 +1180,14 @@ function registerResult(isCorrect){
   } else {
     if(isCorrect){
       session.streak++; session.bestStreak=Math.max(session.bestStreak,session.streak);
-      session.score += Math.round((10 + session.streak*2) * DIFF_MULT[diffSeconds]);
+      pointsGained = Math.round((10 + session.streak*2) * DIFF_MULT[diffSeconds]);
+      session.score += pointsGained;
     } else {
       session.streak = 0;
       session.lives--;
     }
   }
+  creditArtistStats(song, isCorrect, pointsGained);
   updateHud();
   // No auto-advance in any mode anymore — the "Siguiente →" button in revealAnswer() moves on.
 }
