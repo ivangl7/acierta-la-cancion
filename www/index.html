@@ -276,31 +276,28 @@ button.ghostline{background:transparent;color:var(--fg-soft)}
 
 <script>
 // ---------- API config ----------
-// Real values are injected at build time from GitHub Actions secrets into
-// config.js (gitignored, never committed). See config.example.js for the shape.
-const CONFIG = window.APP_CONFIG || { SPOTIFY_CLIENT_ID:'', SPOTIFY_CLIENT_SECRET:'', YOUTUBE_API_KEY:'' };
+// Only the YouTube key travels with the app. The Spotify token is never
+// requested from the device (accounts.spotify.com doesn't allow that call
+// from an app's origin) — instead a GitHub Actions job refreshes it every
+// ~50 minutes and commits it to the repo, and the app just reads that file.
+const CONFIG = window.APP_CONFIG || { YOUTUBE_API_KEY:'' };
+const SPOTIFY_TOKEN_URL = 'https://raw.githubusercontent.com/ivangl7/acierta-la-cancion/main/data/spotify-token.json';
 
 const GENRES = ['Pop','Rock','Reggaetón','Flamenco','Indie','Electrónica','Hip-Hop','Trap','R&B','Latino'];
 const DIFF_META = {15:'Fácil · fragmento de 15 segundos',10:'Medio · fragmento de 10 segundos',5:'Difícil · fragmento de 5 segundos',1:'Muy difícil · fragmento de 1 segundo'};
 
 const $ = id => document.getElementById(id);
 
-// ---------- Spotify (Client Credentials — catalog metadata only) ----------
+// ---------- Spotify (catalog metadata only — token fetched, not requested) ----------
 let spotifyToken = null, spotifyTokenExp = 0;
 async function getSpotifyToken(){
   if(spotifyToken && Date.now() < spotifyTokenExp) return spotifyToken;
-  const res = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': 'Basic ' + btoa(CONFIG.SPOTIFY_CLIENT_ID + ':' + CONFIG.SPOTIFY_CLIENT_SECRET)
-    },
-    body: 'grant_type=client_credentials'
-  });
-  if(!res.ok) throw new Error('No se pudo autenticar con Spotify');
+  const res = await fetch(SPOTIFY_TOKEN_URL + '?t=' + Date.now());
+  if(!res.ok) throw new Error('No se pudo leer el token de Spotify');
   const data = await res.json();
+  if(!data.access_token) throw new Error('Token de Spotify no disponible todavía');
   spotifyToken = data.access_token;
-  spotifyTokenExp = Date.now() + (data.expires_in - 60) * 1000;
+  spotifyTokenExp = data.expires_at - 30000;
   return spotifyToken;
 }
 async function spotifyFetch(url){
