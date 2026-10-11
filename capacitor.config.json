@@ -1,0 +1,6 @@
+{
+  "appId": "com.ivangl7.aciertalacancion",
+  "appName": "Acierta la Canción",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
