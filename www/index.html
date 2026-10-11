@@ -742,35 +742,17 @@ function levenshtein(a,b){
 // era cantante" and "Cuando no era cantante (Remix)" are the same song to type, even
 // though they can be two separate catalog entries (and the one actually playing might
 // be either one).
-const EDITION_WORDS = /\b(remix|rmx|remaster(?:ed|izad[oa])?|re[-\s]?record(?:ed|ado)?|live|en vivo|en directo|directo|acoustic|ac[uú]stic[oa]|unplugged|version|versi[oó]n|edit|radio edit|extended|instrumental|demo|deluxe|bonus track|single version|album version|from the album.*|soundtrack version|mono|stereo|karaoke|cover)\b/i;
-function stripEdition(title){
-  let t = title;
-  // Drop a trailing bracketed/parenthesized qualifier entirely if it contains one of the
-  // words above — but leave it alone if it's just part of the actual title.
-  t = t.replace(/\s*[\(\[][^\)\]]*[\)\]]\s*$/, m => EDITION_WORDS.test(m) ? '' : m);
-  // Same for a trailing " - Qualifier" suffix (common on singles/remix releases).
-  t = t.replace(/\s+[-–]\s+[^-–]+$/, m => EDITION_WORDS.test(m) ? '' : m);
-  return t.trim();
-}
-function closeEnough(a, b){
-  if(!a || !b) return false;
-  if(a===b) return true;
-  const tol = b.length<=5 ? 1 : (b.length<=10 ? 2 : 3);
-  return levenshtein(a,b) <= tol;
-}
+// NOTE: a Remix/En directo/Versión álbum edition is NOT treated as the same answer as the
+// base title — those are genuinely different catalog entries, and if the song actually
+// queued up is specifically the Remix, typing the plain title (or vice versa) must still
+// count as wrong, exactly like any other close-but-different song. isCloseMatch only
+// forgives small typos/accents (Levenshtein distance), never a missing/extra edition tag.
 function isCloseMatch(guess, title){
   const g = normalize(guess), t = normalize(title);
   if(!g) return false;
-  if(closeEnough(g,t)) return true;
-  // Accept the guess if it matches once a known edition qualifier (Remix, En directo,
-  // Versión álbum...) is stripped from either side — it's the same song to write,
-  // whichever edition happens to be the one that's actually playing (or the one typed).
-  const tBase = normalize(stripEdition(title));
-  const gBase = normalize(stripEdition(guess));
-  if(tBase && tBase!==t && closeEnough(g, tBase)) return true;
-  if(gBase && gBase!==g && closeEnough(gBase, t)) return true;
-  if(tBase && gBase && tBase!==t && gBase!==g && closeEnough(gBase, tBase)) return true;
-  return false;
+  if(g===t) return true;
+  const tol = t.length<=5 ? 1 : (t.length<=10 ? 2 : 3);
+  return levenshtein(g,t) <= tol;
 }
 
 function openSheet(mode){
