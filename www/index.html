@@ -382,7 +382,7 @@ async function spotifySearchTracks(q, pages){
 async function searchArtistTracks(artist, yearFrom, yearTo){
   const q = 'artist:"' + artist.name + '"' + yearClause(yearFrom, yearTo);
   const genreLabel = artist.genres[0] || 'Pop';
-  const items = await spotifySearchTracks(q, 3);
+  const items = await spotifySearchTracks(q, 5);
   const tracks = items.filter(tr => (tr.artists||[]).some(a=>a.id===artist.id));
   if(tracks.length===0){
     // No search hits (rare, e.g. very obscure name): fall back to the artist's top tracks.
@@ -393,7 +393,7 @@ async function searchArtistTracks(artist, yearFrom, yearTo){
 }
 async function searchGenreTracks(genre, yearFrom, yearTo){
   const q = 'genre:"' + genre.toLowerCase() + '"' + yearClause(yearFrom, yearTo);
-  const items = await spotifySearchTracks(q, 3);
+  const items = await spotifySearchTracks(q, 5);
   return items.map(tr => trackToSong(tr, genre));
 }
 
@@ -411,16 +411,53 @@ function waitForYt(){
   return new Promise(resolve => ytReadyResolvers.push(resolve));
 }
 const videoIdCache = new Map();
+const videoDurationCache = new Map(); // videoId -> duration in seconds, 0 if unknown
+function parseIsoDuration(iso){
+  const m = (iso||'').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if(!m) return 0;
+  return (parseInt(m[1]||'0',10)*3600) + (parseInt(m[2]||'0',10)*60) + parseInt(m[3]||'0',10);
+}
+// Looks up a few candidate videos and picks one that's actually long enough to contain a
+// real fragment and whose title plausibly matches the song — the plain "first search hit"
+// approach occasionally landed on unrelated clips or YouTube Shorts a couple seconds long.
 async function findVideoId(song){
   const key = song.a + ' - ' + song.t;
   if(videoIdCache.has(key)) return videoIdCache.get(key);
   const q = encodeURIComponent(key + ' audio');
-  const res = await fetch('https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=1&type=video&q=' + q + '&key=' + CONFIG.YOUTUBE_API_KEY);
-  if(!res.ok) throw new Error('Error de YouTube: ' + res.status);
-  const data = await res.json();
-  const id = data.items?.[0]?.id?.videoId || null;
-  videoIdCache.set(key, id);
-  return id;
+  const searchRes = await fetch('https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=5&type=video&videoCategoryId=10&q=' + q + '&key=' + CONFIG.YOUTUBE_API_KEY);
+  if(!searchRes.ok) throw new Error('Error de YouTube: ' + searchRes.status);
+  const searchData = await searchRes.json();
+  const candidateIds = (searchData.items || []).map(it => it.id?.videoId).filter(Boolean);
+  if(candidateIds.length===0){ videoIdCache.set(key, null); return null; }
+
+  let chosenId = candidateIds[0]; // fallback if the details lookup fails for any reason
+  let chosenDuration = 0;
+  try{
+    const detailsRes = await fetch('https://www.googleapis.com/youtube/v3/videos?part=contentDetails,snippet&id=' + candidateIds.join(',') + '&key=' + CONFIG.YOUTUBE_API_KEY);
+    if(detailsRes.ok){
+      const detailsData = await detailsRes.json();
+      const titleNorm = normalize(song.t);
+      const artistNorm = normalize((song.a||'').split(',')[0] || '');
+      const scored = (detailsData.items||[]).map(v=>({
+        id: v.id,
+        seconds: parseIsoDuration(v.contentDetails?.duration),
+        titleText: normalize(v.snippet?.title || '')
+      }));
+      // Prefer a real-length video (rules out shorts/teasers) whose title matches the
+      // song and/or artist; fall back progressively if nothing matches that well.
+      const longEnough = scored.filter(v => v.seconds >= 60);
+      const best =
+        longEnough.find(v => v.titleText.includes(titleNorm)) ||
+        longEnough.find(v => artistNorm && v.titleText.includes(artistNorm)) ||
+        longEnough[0] ||
+        scored[0];
+      if(best){ chosenId = best.id; chosenDuration = best.seconds; }
+    }
+  }catch(e){ /* keep the fallback chosenId from the search results */ }
+
+  videoIdCache.set(key, chosenId);
+  videoDurationCache.set(chosenId, chosenDuration);
+  return chosenId;
 }
 let ytStateHandler = null;
 function playClip(videoId, startSeconds, seconds, onStart){
@@ -785,9 +822,12 @@ async function nextRound(){
     if(myRound !== session.round) return; // superseded by a newer round
     if(!videoId) throw new Error('sin resultado');
     session.pendingVideoId = videoId;
-    // Picked once per round so every replay plays the exact same snippet instead of
-    // drifting further into the song each time.
-    session.clipStart = [15,20,25,30,35,40][Math.floor(Math.random()*6)];
+    // Picked once per round (and clamped to the real video length) so every replay plays
+    // the exact same snippet, and it never lands past the end of a shorter video.
+    const duration = videoDurationCache.get(videoId) || 0;
+    const latestStart = duration > 0 ? Math.max(10, duration - diffSeconds - 5) : 40;
+    const earliestStart = Math.min(15, latestStart);
+    session.clipStart = earliestStart + Math.floor(Math.random() * Math.max(1, latestStart - earliestStart));
     // Cover art stays hidden until the round is resolved — showing it early makes it too easy.
     $('listenBtn').disabled = false;
     $('listenBtn').textContent = 'Escuchar ' + diffSeconds + 's';
@@ -847,14 +887,14 @@ function revealAnswer(isCorrect, song){
     <div class="songtitle">${song.t}</div>
     <div class="songmeta">${song.a} · ${song.y}</div>
   </div>`;
-  if(session.answerMode==='write'){
-    const cont = document.createElement('button');
-    cont.className = 'primary block';
-    cont.style.marginTop = '10px';
-    cont.textContent = 'Siguiente →';
-    cont.onclick = ()=>{ box.innerHTML=''; advance(); };
-    box.appendChild(cont);
-  }
+  // Manual continue in every mode — no auto-advance, so there's always time to see the
+  // answer and to let the next song's search/load finish properly before it's needed.
+  const cont = document.createElement('button');
+  cont.className = 'primary block';
+  cont.style.marginTop = '10px';
+  cont.textContent = 'Siguiente →';
+  cont.onclick = ()=>{ box.innerHTML=''; advance(); };
+  box.appendChild(cont);
 }
 
 function answer(isCorrect, btn, song){
@@ -870,8 +910,7 @@ function answer(isCorrect, btn, song){
     const correctBtn = buttons.find(b=>b.dataset.correct==='1');
     if(correctBtn) correctBtn.classList.add('correct');
   }
-  if(song.img){ $('cover').style.backgroundImage = `url('${song.img}')`; }
-  $('nowPlaying').textContent = song.t + ' — ' + song.a + ' (' + song.y + ')';
+  revealAnswer(isCorrect, song);
   registerResult(isCorrect);
 }
 
@@ -974,9 +1013,7 @@ function registerResult(isCorrect){
     }
   }
   updateHud();
-  if(session.answerMode!=='write'){
-    setTimeout(advance, 1400);
-  }
+  // No auto-advance in any mode anymore — the "Siguiente →" button in revealAnswer() moves on.
 }
 
 function advance(){
