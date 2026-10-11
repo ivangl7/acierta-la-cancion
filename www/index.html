@@ -23,7 +23,7 @@
 }
 :root{color-scheme:dark}
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--fg);font-family:'Inter',system-ui,sans-serif;margin:0;padding-inline:20px;padding-block:22px}
+body{background:var(--bg);color:var(--fg);font-family:'Inter',system-ui,sans-serif;margin:0;padding-inline:20px;padding-block:14px}
 h1,h2,h3{font-family:'Sora',system-ui,sans-serif;font-weight:700;margin:0;text-wrap:balance}
 p{line-height:1.5;color:var(--fg-soft);margin:.3em 0}
 .wrap{max-width:480px;margin:0 auto}
@@ -34,8 +34,8 @@ button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--lin
 button:active{transform:scale(.97)}
 button.block{width:100%}
 
-.statrow{display:flex;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);margin-top:18px;overflow:hidden}
-.stat{flex:1;text-align:center;padding:16px 6px}
+.statrow{display:flex;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);margin-top:14px;overflow:hidden}
+.stat{flex:1;text-align:center;padding:10px 6px}
 .stat+.stat{border-left:1px solid var(--line)}
 .stat .n{font-family:'Sora',sans-serif;font-size:22px;font-weight:700}
 .stat .l{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-mute);margin-top:3px}
@@ -72,31 +72,31 @@ button.primary{background:var(--accent2);color:#06261c;border-color:var(--accent
 .err{color:var(--danger);font-size:13px;text-align:center;min-height:1.1em;margin-top:8px}
 
 /* Play */
-.playcard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
-.cover{width:132px;height:132px;border-radius:16px;margin:0 auto;background:var(--card2) center/cover no-repeat;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.disc{width:92px;height:92px;border-radius:50%;background:
-  radial-gradient(circle at center, var(--grad2) 0 9px, var(--fg) 9px 11px, transparent 11px),
-  repeating-radial-gradient(circle at center, var(--line) 0 2px, transparent 2px 7px)}
+.playcard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.cover{width:72px;height:72px;border-radius:14px;margin:0 auto;background:var(--card2) center/cover no-repeat;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.disc{width:56px;height:56px;border-radius:50%;background:
+  radial-gradient(circle at center, var(--grad2) 0 6px, var(--fg) 6px 7px, transparent 7px),
+  repeating-radial-gradient(circle at center, var(--line) 0 2px, transparent 2px 5px)}
 .disc.spin{animation:spin 2.2s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.timebar-track{height:8px;border-radius:5px;background:var(--line);overflow:hidden;margin-top:14px}
+.timebar-track{height:7px;border-radius:5px;background:var(--line);overflow:hidden;margin-top:9px}
 .timebar-fill{height:100%;background:linear-gradient(90deg,var(--grad1),var(--grad2));width:100%;transform-origin:left}
-.opt{display:block;width:100%;text-align:left;padding:14px 15px;margin-bottom:9px;border-radius:12px;font-size:14px}
+.opt{display:block;width:100%;text-align:left;padding:11px 13px;margin-bottom:6px;border-radius:12px;font-size:14px}
 .opt.correct{background:var(--accent2);color:#06261c;border-color:var(--accent2);font-weight:700}
 .opt.wrong{background:var(--danger);color:#2a0a0a;border-color:var(--danger);font-weight:700}
-.hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .turn{font-size:13px;color:var(--fg-soft)}
 .turn b{color:var(--fg)}
 
-.powerrow{display:flex;gap:8px;margin-top:12px}
-.pwbtn{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px;font-size:13px;font-weight:600}
+.powerrow{display:flex;gap:8px;margin-top:8px}
+.pwbtn{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;padding:8px;font-size:13px;font-weight:600}
 .pwbtn:disabled{opacity:.4;cursor:default}
 .pwbtn .badge{background:var(--card2);border-radius:999px;padding:1px 7px;font-size:11px}
 
-.writerow{margin-top:18px}
+.writerow{margin-top:12px}
 button.ghostline{background:transparent;color:var(--fg-soft)}
 
-.reveal{border-radius:14px;padding:16px;margin-top:16px;border:1px solid}
+.reveal{border-radius:14px;padding:13px;margin-top:10px;border:1px solid}
 .reveal.ok{border-color:var(--accent2);background:color-mix(in srgb, var(--accent2) 10%, var(--card))}
 .reveal.ko{border-color:var(--danger);background:color-mix(in srgb, var(--danger) 10%, var(--card))}
 .reveal .tag{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
@@ -255,20 +255,20 @@ button.ghostline{background:transparent;color:var(--fg-soft)}
       <div class="stat"><div class="n" id="statLives">♥♥♥</div><div class="l">Vidas</div></div>
     </div>
 
-    <div class="playcard" style="margin-top:14px">
+    <div class="playcard" style="margin-top:10px">
       <div class="cover" id="cover"><div class="disc" id="disc"></div></div>
-      <button class="primary block" id="listenBtn" style="margin-top:14px" disabled>Buscando canción…</button>
-      <p style="text-align:center;margin-top:8px;font-size:13px;min-height:1.1em" id="nowPlaying"></p>
+      <button class="primary block" id="listenBtn" style="margin-top:10px" disabled>Buscando canción…</button>
+      <p style="text-align:center;margin-top:5px;font-size:13px;min-height:1.1em" id="nowPlaying"></p>
       <div class="timebar-track"><div class="timebar-fill" id="timeFill"></div></div>
       <div class="powerrow" id="powerRow">
         <button class="pwbtn" id="pwFifty">50% <span class="badge" id="pwFiftyCount">2</span></button>
         <button class="pwbtn" id="pwSkip">⇄ Cambiar <span class="badge" id="pwSkipCount">2</span></button>
       </div>
-      <div id="options" style="margin-top:18px"></div>
+      <div id="options" style="margin-top:10px"></div>
       <div class="writerow" id="writeRow" hidden>
         <input type="text" id="writeInput" placeholder="Escribe el título de la canción…" autocomplete="off">
-        <button class="block ghostline" id="giveUpBtn" style="margin-top:8px">Rendirse</button>
-        <button class="primary block" id="writeSubmitBtn" style="margin-top:8px">Comprobar</button>
+        <button class="block ghostline" id="giveUpBtn" style="margin-top:6px">Rendirse</button>
+        <button class="primary block" id="writeSubmitBtn" style="margin-top:6px">Comprobar</button>
       </div>
       <div id="revealBox"></div>
     </div>
@@ -782,7 +782,7 @@ async function nextRound(){
     if(myRound !== session.round) return; // superseded by a newer round
     if(!videoId) throw new Error('sin resultado');
     session.pendingVideoId = videoId;
-    if(song.img){ $('cover').style.backgroundImage = `url('${song.img}')`; $('disc').hidden = true; }
+    // Cover art stays hidden until the round is resolved — showing it early makes it too easy.
     $('listenBtn').disabled = false;
     $('listenBtn').textContent = 'Escuchar ' + diffSeconds + 's';
   }catch(e){
@@ -809,8 +809,12 @@ $('listenBtn').onclick = async ()=>{
     });
     if(myRound !== session.round) return;
     $('disc').classList.remove('spin');
-    $('listenBtn').textContent = 'Escuchado';
-    if(!session.answered) handleTimeout(song);
+    // No auto-resolve: the clip finishing just means you can listen again until you
+    // actually answer (pick an option, write/give up, or skip with the power-up).
+    if(!session.answered){
+      $('listenBtn').disabled = false;
+      $('listenBtn').textContent = 'Volver a escuchar';
+    }
   }catch(e){
     if(myRound !== session.round) return;
     $('nowPlaying').textContent = 'No se pudo reproducir el audio, pasando a la siguiente…';
@@ -828,28 +832,8 @@ function enableAnswering(on){
   }
 }
 
-function handleTimeout(song){
-  if(session.answered) return;
-  session.answered = true;
-  stopClip();
-  $('disc').classList.remove('spin');
-  $('listenBtn').disabled = true;
-  if(session.answerMode==='write'){
-    $('writeInput').disabled = true;
-    $('writeSubmitBtn').disabled = true;
-    $('giveUpBtn').disabled = true;
-  } else {
-    const buttons = [...document.querySelectorAll('.opt')];
-    const correctBtn = buttons.find(b=>b.dataset.correct==='1');
-    if(correctBtn) correctBtn.classList.add('correct');
-    buttons.forEach(b=>b.disabled=true);
-  }
-  $('nowPlaying').textContent = song.t + ' — ' + song.a + ' (' + song.y + ')';
-  revealAnswer(false, song);
-  registerResult(false);
-}
-
 function revealAnswer(isCorrect, song){
+  if(song.img){ $('cover').style.backgroundImage = `url('${song.img}')`; $('disc').hidden = true; }
   const box = $('revealBox');
   box.innerHTML = `<div class="reveal ${isCorrect?'ok':'ko'}">
     <div class="tag">${isCorrect?'Correcto':'Incorrecto'}</div>
@@ -880,6 +864,7 @@ function answer(isCorrect, btn, song){
     const correctBtn = buttons.find(b=>b.dataset.correct==='1');
     if(correctBtn) correctBtn.classList.add('correct');
   }
+  if(song.img){ $('cover').style.backgroundImage = `url('${song.img}')`; $('disc').hidden = true; }
   $('nowPlaying').textContent = song.t + ' — ' + song.a + ' (' + song.y + ')';
   registerResult(isCorrect);
 }
