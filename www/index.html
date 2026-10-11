@@ -62,7 +62,7 @@ button.block{width:100%}
 .diffmeta{font-size:12px;color:var(--fg-soft);margin-top:8px}
 .field{margin-top:18px}
 .field label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--fg-mute);font-weight:700}
-input[type=text]{font:inherit;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);width:100%;margin-top:6px}
+input[type=text],input[type=number]{font:inherit;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);width:100%;margin-top:6px}
 .chiprow{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .chip{padding:7px 13px;border-radius:999px;border:1px solid var(--line);font-size:13px;background:var(--card)}
 .chip.on{background:var(--accent2);border-color:var(--accent2);color:#06261c;font-weight:600}
@@ -155,7 +155,7 @@ button.ghostline{background:transparent;color:var(--fg-soft)}
       <h3 id="sheetTitle">Solo</h3>
 
       <div class="field">
-        <label>Dificultad</label>
+        <label>Duración del fragmento</label>
         <div class="diffgrid">
           <button class="diffbtn" data-sec="15">Fácil</button>
           <button class="diffbtn" data-sec="10">Medio</button>
@@ -163,6 +163,16 @@ button.ghostline{background:transparent;color:var(--fg-soft)}
           <button class="diffbtn" data-sec="1">Muy difícil</button>
         </div>
         <p class="diffmeta" id="diffMeta">Fragmento de 5 segundos</p>
+      </div>
+
+      <div class="field">
+        <label>Dificultad de las canciones</label>
+        <div class="chiprow" id="songDiffChips">
+          <button class="chip" data-pop="popular">Éxitos</button>
+          <button class="chip on" data-pop="any">Variado</button>
+          <button class="chip" data-pop="obscure">Poco conocidas</button>
+        </div>
+        <p class="diffmeta">Por lo conocida que es la canción, además de la duración del fragmento</p>
       </div>
 
       <div class="field">
@@ -199,6 +209,14 @@ button.ghostline{background:transparent;color:var(--fg-soft)}
       <div class="field">
         <label>Género</label>
         <div class="chiprow" id="genreChips"></div>
+      </div>
+
+      <div class="field">
+        <label>Rango de años (opcional)</label>
+        <div style="display:flex;gap:8px">
+          <input type="number" id="yearFrom" placeholder="Desde, ej. 1990" inputmode="numeric">
+          <input type="number" id="yearTo" placeholder="Hasta, ej. 2020" inputmode="numeric">
+        </div>
       </div>
 
       <p class="err" id="configError"></p>
@@ -316,16 +334,30 @@ function trackToSong(tr, genreLabel){
     t: tr.name,
     a: (tr.artists||[]).map(x=>x.name).join(', '),
     y: (tr.album?.release_date || '').slice(0,4) || '—',
-    g: genreLabel || '—'
+    g: genreLabel || '—',
+    p: typeof tr.popularity==='number' ? tr.popularity : 50
   };
 }
-async function getArtistTopTracks(artist){
-  const data = await spotifyFetch('https://api.spotify.com/v1/artists/' + artist.id + '/top-tracks?market=ES');
-  const genreLabel = artist.genres[0] || 'Pop';
-  return (data.tracks || []).slice(0,10).map(tr => trackToSong(tr, genreLabel));
+function yearClause(yearFrom, yearTo){
+  if(!yearFrom && !yearTo) return '';
+  const from = yearFrom || 1900, to = yearTo || new Date().getFullYear();
+  return ' year:' + from + '-' + to;
 }
-async function searchGenreTracks(genre){
-  const data = await spotifyFetch('https://api.spotify.com/v1/search?type=track&limit=20&q=' + encodeURIComponent('genre:"' + genre.toLowerCase() + '"'));
+async function searchArtistTracks(artist, yearFrom, yearTo){
+  const q = 'artist:"' + artist.name + '"' + yearClause(yearFrom, yearTo);
+  const data = await spotifyFetch('https://api.spotify.com/v1/search?type=track&limit=50&q=' + encodeURIComponent(q));
+  const genreLabel = artist.genres[0] || 'Pop';
+  const tracks = (data.tracks?.items || []).filter(tr => (tr.artists||[]).some(a=>a.id===artist.id));
+  if(tracks.length===0){
+    // No search hits (rare, e.g. very obscure name): fall back to the artist's top tracks.
+    const fallback = await spotifyFetch('https://api.spotify.com/v1/artists/' + artist.id + '/top-tracks?market=ES');
+    return (fallback.tracks || []).slice(0,10).map(tr => trackToSong(tr, genreLabel));
+  }
+  return tracks.map(tr => trackToSong(tr, genreLabel));
+}
+async function searchGenreTracks(genre, yearFrom, yearTo){
+  const q = 'genre:"' + genre.toLowerCase() + '"' + yearClause(yearFrom, yearTo);
+  const data = await spotifyFetch('https://api.spotify.com/v1/search?type=track&limit=50&q=' + encodeURIComponent(q));
   return (data.tracks?.items || []).map(tr => trackToSong(tr, genre));
 }
 
@@ -415,6 +447,7 @@ paintBest();
 let selectedArtists = new Map(); // id -> {id,name,genres}
 let selectedGenres = new Set();
 let diffSeconds = 5;
+let songDifficulty = 'any'; // 'popular' | 'any' | 'obscure' — recognizability, independent of clip duration
 let pendingMode = 'lives';
 let answerMode = 'choice';
 let numOptions = 4;
@@ -435,6 +468,13 @@ document.querySelectorAll('#optCountChips .chip').forEach(btn=>{
     document.querySelectorAll('#optCountChips .chip').forEach(b=>b.classList.remove('on'));
     btn.classList.add('on');
     numOptions = parseInt(btn.dataset.n,10);
+  };
+});
+document.querySelectorAll('#songDiffChips .chip').forEach(btn=>{
+  btn.onclick = ()=>{
+    document.querySelectorAll('#songDiffChips .chip').forEach(b=>b.classList.remove('on'));
+    btn.classList.add('on');
+    songDifficulty = btn.dataset.pop;
   };
 });
 document.querySelectorAll('#powerupChips .chip').forEach(btn=>{
@@ -542,20 +582,33 @@ document.querySelectorAll('.diffbtn').forEach(btn=>{
 $('diffMeta').textContent = DIFF_META[diffSeconds];
 
 async function buildPool(){
+  let yearFrom = parseInt($('yearFrom').value, 10) || null;
+  let yearTo = parseInt($('yearTo').value, 10) || null;
+  if(yearFrom && yearTo && yearFrom > yearTo){ const t = yearFrom; yearFrom = yearTo; yearTo = t; }
+
   const groups = [];
-  for(const artist of selectedArtists.values()) groups.push(getArtistTopTracks(artist));
-  for(const genre of selectedGenres) groups.push(searchGenreTracks(genre));
-  if(groups.length===0) groups.push(searchGenreTracks('pop')); // no filters: fall back to popular pop tracks
+  for(const artist of selectedArtists.values()) groups.push(searchArtistTracks(artist, yearFrom, yearTo));
+  for(const genre of selectedGenres) groups.push(searchGenreTracks(genre, yearFrom, yearTo));
+  if(groups.length===0) groups.push(searchGenreTracks('pop', yearFrom, yearTo)); // no filters: fall back to popular pop tracks
   const results = await Promise.all(groups);
-  const pool = results.flat();
+  let pool = results.flat();
+
   // de-dupe by title+artist
   const seen = new Set();
-  return pool.filter(s=>{
+  pool = pool.filter(s=>{
     const key = s.t + '|' + s.a;
     if(seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+
+  // Popularity-based difficulty (how recognizable a song is), independent of clip duration.
+  // Falls back to the unfiltered pool if the filter leaves too few songs to play with.
+  if(songDifficulty !== 'any'){
+    const filtered = pool.filter(s => songDifficulty==='popular' ? s.p>=60 : s.p<=40);
+    if(filtered.length>=4) pool = filtered;
+  }
+  return pool;
 }
 
 let lastPool = null;
