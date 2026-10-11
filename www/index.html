@@ -73,12 +73,7 @@ button.primary{background:var(--accent2);color:#06261c;border-color:var(--accent
 
 /* Play */
 .playcard{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
-.cover{width:72px;height:72px;border-radius:14px;margin:0 auto;background:var(--card2) center/cover no-repeat;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.disc{width:56px;height:56px;border-radius:50%;background:
-  radial-gradient(circle at center, var(--grad2) 0 6px, var(--fg) 6px 7px, transparent 7px),
-  repeating-radial-gradient(circle at center, var(--line) 0 2px, transparent 2px 5px)}
-.disc.spin{animation:spin 2.2s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
+.cover{width:min(100%,220px);aspect-ratio:1/1;border-radius:16px;margin:0 auto;background:radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--fg) 6%, var(--card2)) 0%, var(--card2) 70%) center/cover no-repeat;overflow:hidden}
 .timebar-track{height:7px;border-radius:5px;background:var(--line);overflow:hidden;margin-top:9px}
 .timebar-fill{height:100%;background:linear-gradient(90deg,var(--grad1),var(--grad2));width:100%;transform-origin:left}
 .opt{display:block;width:100%;text-align:left;padding:11px 13px;margin-bottom:6px;border-radius:12px;font-size:14px}
@@ -265,7 +260,7 @@ button.ghostline{background:transparent;color:var(--fg-soft)}
     </div>
 
     <div class="playcard" style="margin-top:10px">
-      <div class="cover" id="cover"><div class="disc" id="disc"></div></div>
+      <div class="cover" id="cover"></div>
       <button class="primary block" id="listenBtn" style="margin-top:10px" disabled>Buscando canción…</button>
       <p style="text-align:center;margin-top:5px;font-size:13px;min-height:1.1em" id="nowPlaying"></p>
       <div class="timebar-track"><div class="timebar-fill" id="timeFill"></div></div>
@@ -428,12 +423,11 @@ async function findVideoId(song){
   return id;
 }
 let ytStateHandler = null;
-function playClip(videoId, seconds, onStart){
+function playClip(videoId, startSeconds, seconds, onStart){
   return new Promise((resolve, reject)=>{
     try{
-      const start = [15,20,25,30,35,40][Math.floor(Math.random()*6)];
       if(ytStateHandler) ytPlayer.removeEventListener && null;
-      ytPlayer.loadVideoById({ videoId, startSeconds: start });
+      ytPlayer.loadVideoById({ videoId, startSeconds });
       let started = false;
       ytStateHandler = (e)=>{
         if(e.data === YT.PlayerState.PLAYING && !started){
@@ -750,8 +744,6 @@ async function nextRound(){
   const myRound = session.round;
 
   $('revealBox').innerHTML = '';
-  $('disc').classList.remove('spin');
-  $('disc').hidden = false;
   $('cover').style.backgroundImage = '';
   $('nowPlaying').textContent = '';
   $('timeFill').style.transition = 'none';
@@ -793,6 +785,9 @@ async function nextRound(){
     if(myRound !== session.round) return; // superseded by a newer round
     if(!videoId) throw new Error('sin resultado');
     session.pendingVideoId = videoId;
+    // Picked once per round so every replay plays the exact same snippet instead of
+    // drifting further into the song each time.
+    session.clipStart = [15,20,25,30,35,40][Math.floor(Math.random()*6)];
     // Cover art stays hidden until the round is resolved — showing it early makes it too easy.
     $('listenBtn').disabled = false;
     $('listenBtn').textContent = 'Escuchar ' + diffSeconds + 's';
@@ -806,22 +801,23 @@ async function nextRound(){
 $('listenBtn').onclick = async ()=>{
   if(!session || !session.pendingVideoId || session.answered || $('listenBtn').disabled) return;
   const myRound = session.round;
-  const song = session.currentSong;
   $('listenBtn').disabled = true;
   $('listenBtn').textContent = 'Reproduciendo…';
+  // Reset the bar before each play/replay so it always animates from full, not from
+  // wherever the previous listen left it.
+  $('timeFill').style.transition = 'none';
+  $('timeFill').style.width = '100%';
   enableAnswering(true);
   try{
-    await playClip(session.pendingVideoId, diffSeconds, ()=>{
-      $('disc').classList.add('spin');
+    await playClip(session.pendingVideoId, session.clipStart, diffSeconds, ()=>{
       requestAnimationFrame(()=>{
         $('timeFill').style.transition = `width ${diffSeconds}s linear`;
         $('timeFill').style.width = '0%';
       });
     });
     if(myRound !== session.round) return;
-    $('disc').classList.remove('spin');
-    // No auto-resolve: the clip finishing just means you can listen again until you
-    // actually answer (pick an option, write/give up, or skip with the power-up).
+    // No auto-resolve: the clip finishing just means you can listen again (always from the
+    // same point in the song) until you actually answer, write/give up, or use the skip power-up.
     if(!session.answered){
       $('listenBtn').disabled = false;
       $('listenBtn').textContent = 'Volver a escuchar';
@@ -844,7 +840,7 @@ function enableAnswering(on){
 }
 
 function revealAnswer(isCorrect, song){
-  if(song.img){ $('cover').style.backgroundImage = `url('${song.img}')`; $('disc').hidden = true; }
+  if(song.img){ $('cover').style.backgroundImage = `url('${song.img}')`; }
   const box = $('revealBox');
   box.innerHTML = `<div class="reveal ${isCorrect?'ok':'ko'}">
     <div class="tag">${isCorrect?'Correcto':'Incorrecto'}</div>
@@ -865,7 +861,6 @@ function answer(isCorrect, btn, song){
   if(session.answered) return;
   session.answered = true;
   stopClip();
-  $('disc').classList.remove('spin');
   $('listenBtn').disabled = true;
   $('timeFill').style.transition = 'none';
   const buttons = [...document.querySelectorAll('.opt')];
@@ -875,7 +870,7 @@ function answer(isCorrect, btn, song){
     const correctBtn = buttons.find(b=>b.dataset.correct==='1');
     if(correctBtn) correctBtn.classList.add('correct');
   }
-  if(song.img){ $('cover').style.backgroundImage = `url('${song.img}')`; $('disc').hidden = true; }
+  if(song.img){ $('cover').style.backgroundImage = `url('${song.img}')`; }
   $('nowPlaying').textContent = song.t + ' — ' + song.a + ' (' + song.y + ')';
   registerResult(isCorrect);
 }
@@ -884,7 +879,6 @@ function submitWrite(isGiveUp){
   if(session.answered) return;
   session.answered = true;
   stopClip();
-  $('disc').classList.remove('spin');
   $('listenBtn').disabled = true;
   $('writeSuggestions').innerHTML = '';
   $('timeFill').style.transition = 'none';
