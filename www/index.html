@@ -356,11 +356,29 @@ function yearClause(yearFrom, yearTo){
   const from = yearFrom || 1900, to = yearTo || new Date().getFullYear();
   return ' year:' + from + '-' + to;
 }
+// Spotify quietly dropped the max `limit` on /v1/search from 50 to 10 (undocumented,
+// ~Jan/Feb 2026). To still get a decent-sized pool, page through a few requests of 10
+// in parallel instead of asking for 50 in one go (which now gets a 400 "Invalid limit").
+async function spotifySearchTracks(q, pages){
+  const limit = 10;
+  const calls = [];
+  for(let i=0;i<pages;i++){
+    calls.push(spotifyFetch('https://api.spotify.com/v1/search?type=track&limit=' + limit + '&offset=' + (i*limit) + '&q=' + encodeURIComponent(q)));
+  }
+  const settled = await Promise.allSettled(calls);
+  const items = [];
+  settled.forEach(r => { if(r.status==='fulfilled') items.push(...(r.value.tracks?.items || [])); });
+  if(items.length===0){
+    const firstError = settled.find(r => r.status==='rejected');
+    if(firstError) throw firstError.reason;
+  }
+  return items;
+}
 async function searchArtistTracks(artist, yearFrom, yearTo){
   const q = 'artist:"' + artist.name + '"' + yearClause(yearFrom, yearTo);
-  const data = await spotifyFetch('https://api.spotify.com/v1/search?type=track&limit=50&q=' + encodeURIComponent(q));
   const genreLabel = artist.genres[0] || 'Pop';
-  const tracks = (data.tracks?.items || []).filter(tr => (tr.artists||[]).some(a=>a.id===artist.id));
+  const items = await spotifySearchTracks(q, 3);
+  const tracks = items.filter(tr => (tr.artists||[]).some(a=>a.id===artist.id));
   if(tracks.length===0){
     // No search hits (rare, e.g. very obscure name): fall back to the artist's top tracks.
     const fallback = await spotifyFetch('https://api.spotify.com/v1/artists/' + artist.id + '/top-tracks?market=ES');
@@ -370,8 +388,8 @@ async function searchArtistTracks(artist, yearFrom, yearTo){
 }
 async function searchGenreTracks(genre, yearFrom, yearTo){
   const q = 'genre:"' + genre.toLowerCase() + '"' + yearClause(yearFrom, yearTo);
-  const data = await spotifyFetch('https://api.spotify.com/v1/search?type=track&limit=50&q=' + encodeURIComponent(q));
-  return (data.tracks?.items || []).map(tr => trackToSong(tr, genre));
+  const items = await spotifySearchTracks(q, 3);
+  return items.map(tr => trackToSong(tr, genre));
 }
 
 // ---------- YouTube (audio-only playback via hidden IFrame player) ----------
