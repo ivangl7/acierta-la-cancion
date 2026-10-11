@@ -96,6 +96,15 @@ button.primary{background:var(--accent2);color:#06261c;border-color:var(--accent
 .writerow{margin-top:12px}
 button.ghostline{background:transparent;color:var(--fg-soft)}
 
+.suglist{margin-top:8px;border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+.sugitem{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--card);width:100%;text-align:left;border:none;border-radius:0}
+.sugitem+.sugitem{border-top:1px solid var(--line)}
+.sugitem .thumb{width:38px;height:38px;border-radius:8px;background:var(--card2) center/cover no-repeat;flex-shrink:0}
+.sugitem .meta{min-width:0}
+.sugitem .t{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sugitem .a{font-size:12px;color:var(--fg-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sugmore{font-size:12px;color:var(--fg-mute);text-align:center;padding:7px 0}
+
 .reveal{border-radius:14px;padding:13px;margin-top:10px;border:1px solid}
 .reveal.ok{border-color:var(--accent2);background:color-mix(in srgb, var(--accent2) 10%, var(--card))}
 .reveal.ko{border-color:var(--danger);background:color-mix(in srgb, var(--danger) 10%, var(--card))}
@@ -267,6 +276,7 @@ button.ghostline{background:transparent;color:var(--fg-soft)}
       <div id="options" style="margin-top:10px"></div>
       <div class="writerow" id="writeRow" hidden>
         <input type="text" id="writeInput" placeholder="Escribe el título de la canción…" autocomplete="off">
+        <div id="writeSuggestions"></div>
         <button class="block ghostline" id="giveUpBtn" style="margin-top:6px">Rendirse</button>
         <button class="primary block" id="writeSubmitBtn" style="margin-top:6px">Comprobar</button>
       </div>
@@ -754,6 +764,7 @@ async function nextRound(){
     $('options').hidden = true;
     $('writeRow').hidden = false;
     $('writeInput').value = '';
+    $('writeSuggestions').innerHTML = '';
     $('writeInput').disabled = true;
     $('writeSubmitBtn').disabled = true;
     $('giveUpBtn').disabled = true;
@@ -875,6 +886,7 @@ function submitWrite(isGiveUp){
   stopClip();
   $('disc').classList.remove('spin');
   $('listenBtn').disabled = true;
+  $('writeSuggestions').innerHTML = '';
   $('timeFill').style.transition = 'none';
   $('writeInput').disabled = true;
   $('writeSubmitBtn').disabled = true;
@@ -887,6 +899,46 @@ function submitWrite(isGiveUp){
 $('writeSubmitBtn').onclick = ()=>submitWrite(false);
 $('giveUpBtn').onclick = ()=>submitWrite(true);
 $('writeInput').addEventListener('keydown', e=>{ if(e.key==='Enter') submitWrite(false); });
+
+// Live song suggestions while typing in "write the title" mode — tapping one answers with it.
+let writeSuggestDebounce = null;
+$('writeInput').addEventListener('input', e=>{
+  clearTimeout(writeSuggestDebounce);
+  const q = e.target.value;
+  writeSuggestDebounce = setTimeout(()=>renderWriteSuggestions(q), 150);
+});
+function renderWriteSuggestions(q){
+  const box = $('writeSuggestions');
+  box.innerHTML = '';
+  const query = normalize(q);
+  if(!query || !session || !session.pool || session.answered) return;
+  const matches = session.pool.filter(s => normalize(s.t).includes(query) || normalize(s.a).includes(query));
+  if(matches.length===0) return;
+  const list = document.createElement('div');
+  list.className = 'suglist';
+  matches.slice(0,6).forEach(s=>{
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sugitem';
+    b.innerHTML = '<span class="thumb"' + (s.img ? ` style="background-image:url('${s.img}')"` : '') + '></span>' +
+      '<span class="meta"><div class="t"></div><div class="a"></div></span>';
+    b.querySelector('.t').textContent = s.t;
+    b.querySelector('.a').textContent = s.a;
+    b.onclick = ()=>{
+      $('writeInput').value = s.t;
+      box.innerHTML = '';
+      submitWrite(false);
+    };
+    list.appendChild(b);
+  });
+  box.appendChild(list);
+  if(matches.length>6){
+    const more = document.createElement('div');
+    more.className = 'sugmore';
+    more.textContent = 'Hay más resultados: añade más letras para acotar la búsqueda.';
+    box.appendChild(more);
+  }
+}
 
 $('pwFifty').onclick = ()=>{
   const pw = activePowerups();
