@@ -362,27 +362,48 @@ function yearClause(yearFrom, yearTo){
   return ' year:' + from + '-' + to;
 }
 // Spotify quietly dropped the max `limit` on /v1/search from 50 to 10 (undocumented,
-// ~Jan/Feb 2026). To still get a decent-sized pool, page through a few requests of 10
-// in parallel instead of asking for 50 in one go (which now gets a 400 "Invalid limit").
-async function spotifySearchTracks(q, pages){
+// ~Jan/Feb 2026), so a single request can no longer pull a big pool. Instead this pages
+// through in batches of 5 parallel requests (10 each) and keeps going until a batch comes
+// back with a short page — i.e. the real catalog is exhausted — rather than stopping at an
+// arbitrary count. maxPages is just a safety ceiling so a huge genre can't page forever.
+async function spotifySearchTracks(q, maxPages){
   const limit = 10;
-  const calls = [];
-  for(let i=0;i<pages;i++){
-    calls.push(spotifyFetch('https://api.spotify.com/v1/search?type=track&limit=' + limit + '&offset=' + (i*limit) + '&q=' + encodeURIComponent(q)));
-  }
-  const settled = await Promise.allSettled(calls);
+  const batchSize = 5;
   const items = [];
-  settled.forEach(r => { if(r.status==='fulfilled') items.push(...(r.value.tracks?.items || [])); });
-  if(items.length===0){
-    const firstError = settled.find(r => r.status==='rejected');
-    if(firstError) throw firstError.reason;
+  let page = 0;
+  let firstBatchFailed = null;
+  while(page < maxPages){
+    const thisBatch = Math.min(batchSize, maxPages - page);
+    const calls = [];
+    for(let i=0;i<thisBatch;i++){
+      const offset = (page+i)*limit;
+      calls.push(spotifyFetch('https://api.spotify.com/v1/search?type=track&limit=' + limit + '&offset=' + offset + '&q=' + encodeURIComponent(q)));
+    }
+    const settled = await Promise.allSettled(calls);
+    let anyFulfilled = false;
+    let reachedEnd = false;
+    settled.forEach(r=>{
+      if(r.status==='fulfilled'){
+        anyFulfilled = true;
+        const pageItems = r.value.tracks?.items || [];
+        items.push(...pageItems);
+        if(pageItems.length < limit) reachedEnd = true;
+      }
+    });
+    if(page===0 && !anyFulfilled){
+      firstBatchFailed = settled.find(r=>r.status==='rejected')?.reason;
+    }
+    page += thisBatch;
+    if(reachedEnd || !anyFulfilled) break;
   }
+  if(items.length===0 && firstBatchFailed) throw firstBatchFailed;
   return items;
 }
 async function searchArtistTracks(artist, yearFrom, yearTo){
   const q = 'artist:"' + artist.name + '"' + yearClause(yearFrom, yearTo);
   const genreLabel = artist.genres[0] || 'Pop';
-  const items = await spotifySearchTracks(q, 5);
+  // Page generously — the goal is the artist's whole searchable repertoire, not a sample.
+  const items = await spotifySearchTracks(q, 30);
   const tracks = items.filter(tr => (tr.artists||[]).some(a=>a.id===artist.id));
   if(tracks.length===0){
     // No search hits (rare, e.g. very obscure name): fall back to the artist's top tracks.
@@ -393,7 +414,8 @@ async function searchArtistTracks(artist, yearFrom, yearTo){
 }
 async function searchGenreTracks(genre, yearFrom, yearTo){
   const q = 'genre:"' + genre.toLowerCase() + '"' + yearClause(yearFrom, yearTo);
-  const items = await spotifySearchTracks(q, 5);
+  // A genre's real catalog is huge, so this is a large sample rather than "everything".
+  const items = await spotifySearchTracks(q, 10);
   return items.map(tr => trackToSong(tr, genre));
 }
 
