@@ -25,14 +25,10 @@ jobs:
 
       - name: Write runtime config from secrets
         env:
-          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
-          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: |
           cat > www/config.js <<EOF
           window.APP_CONFIG = {
-            SPOTIFY_CLIENT_ID: "${SPOTIFY_CLIENT_ID}",
-            SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET}",
             YOUTUBE_API_KEY: "${YOUTUBE_API_KEY}"
           };
           EOF
